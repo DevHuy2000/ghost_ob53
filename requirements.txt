@@ -3,6 +3,7 @@ psutil
 PyJWT
 urllib3
 protobuf
+protobuf-decoder
 Flask
 flask-cors
 pycryptodome
