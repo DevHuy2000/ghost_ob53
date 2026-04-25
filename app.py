@@ -10,7 +10,6 @@ import threading
 import pickle
 import random
 import urllib3
-import queue
 import asyncio
 from datetime import datetime
 from threading import Thread
@@ -31,9 +30,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 connected_clients = {}
 connected_clients_lock = threading.Lock()
-
-# Hàng đợi trung tâm — Flask ném vào, Worker lấy ra xử lý
-task_queue: queue.Queue = queue.Queue(maxsize=100)
 
 app = Flask(__name__)
 CORS(app)
@@ -161,11 +157,7 @@ class SimpleAPI:
             result = {"account_number": client_number, "account_id": client.id, "status": "processing"}
             
             if hasattr(client, 'CliEnts2') and client.CliEnts2 and hasattr(client, 'key') and client.key and hasattr(client, 'iv') and client.iv:
-
-                rj_packet = req_join(int(team_id), client.key, client.iv)
-                client.CliEnts2.send(rj_packet)
-                time.sleep(0.15)
-
+                
                 ghost_packet = GhostPakcet(team_id, name, sq_value, client.key, client.iv)
                 client.CliEnts2.send(ghost_packet)
                 time.sleep(0.5)
@@ -185,25 +177,6 @@ class SimpleAPI:
 
 api_handler = SimpleAPI()
 
-# ─── Task Worker ───────────────────────────────
-class TaskWorker(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True, name="TaskWorker")
-
-    def run(self):
-        print("[Worker] Đã khởi động, đang chờ task...")
-        while True:
-            try:
-                task = task_queue.get(timeout=1)
-            except queue.Empty:
-                continue
-            try:
-                api_handler.process_ghost_command(task["teamcode"], task["name"])
-            except Exception as e:
-                print(f"[Worker] Lỗi xử lý task: {e}")
-            finally:
-                task_queue.task_done()
-
 @app.route('/')
 def home():
     return jsonify({
@@ -219,19 +192,18 @@ def ghost():
     teamcode = request.args.get('tc')
     name = request.args.get('name')
     api_key = request.args.get('api_key')
-
-    if not api_key or not api_handler.validate_api_key(api_key):
+    
+    if not api_key:
         return jsonify({"status": "error", "message": "Thiếu Key Rồi.!"}), 401
-
+        
+    if not api_handler.validate_api_key(api_key):
+        return jsonify({"status": "error", "message": "Thiếu Key Rồi.!"}), 401
+        
     if not teamcode or not name:
         return jsonify({"status": "error", "message": "Thiếu Dữ Liệu!"}), 400
-
-    try:
-        task_queue.put_nowait({"teamcode": teamcode, "name": name})
-    except queue.Full:
-        return jsonify({"status": "error", "message": "Server đang quá tải, thử lại sau."}), 503
-
-    return jsonify({"status": "queued", "message": "✅ Success Sending..."})
+        
+    result = api_handler.process_ghost_command(teamcode, name)
+    return jsonify(result)
 
 def run_flask_api():
     print("API...")
@@ -620,9 +592,6 @@ def start_account(account):
 def StarT_SerVer():
     api_thread = threading.Thread(target=run_flask_api, daemon=True)
     api_thread.start()
-
-    # Worker tách biệt hoàn toàn khỏi Flask
-    TaskWorker().start()
     
     threads = []
     
