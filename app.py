@@ -28,17 +28,29 @@ from byte import *
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Globals
+# ─────────────────────────────────────────────
+#  GLOBALS
+# ─────────────────────────────────────────────
+
 connected_clients: dict = {}
 connected_clients_lock = threading.Lock()
+
+# Hàng đợi trung tâm: Flask ném task vào đây, Worker lấy ra xử lý
 task_queue: queue.Queue = queue.Queue()
+
 app = Flask(__name__)
 CORS(app)
+
 API_KEY = "senzu_new"
 
-# Flask/Api
+
+# ─────────────────────────────────────────────
+#  FLASK API  (chỉ nhận lệnh → enqueue → trả về ngay)
+# ─────────────────────────────────────────────
+
 def validate_api_key(api_key: str) -> bool:
     return api_key == API_KEY
+
 
 @app.route('/')
 def home():
@@ -47,6 +59,7 @@ def home():
         "message": "buy source: @S_ZU_01",
         "endpoints": {"/send?tc=&name=&api_key="}
     })
+
 
 @app.route('/send')
 def ghost_endpoint():
@@ -60,6 +73,7 @@ def ghost_endpoint():
     if not teamcode or not name:
         return jsonify({"status": "error", "message": "Thiếu Dữ Liệu!"}), 400
 
+    # ✅ Không gọi bot trực tiếp — chỉ ném task vào Queue rồi trả về ngay
     task = {
         "action":   "ghost",
         "teamcode": teamcode,
@@ -67,19 +81,29 @@ def ghost_endpoint():
         "ts":       time.time(),
     }
     task_queue.put(task)
+
     return jsonify({
         "status":  "queued",
         "message": "✅ Success Sending...",
         "task":    task,
     })
 
+
 def run_flask_api():
     print("[API] Flask đang chạy trên :6002")
     app.run(host='0.0.0.0', port=6002, debug=False)
 
+
+# ─────────────────────────────────────────────
+#  WORKER  (thread riêng, poll queue liên tục)
+# ─────────────────────────────────────────────
+
 class TaskWorker(threading.Thread):
+    """Thread độc lập, lấy task từ queue và thực thi an toàn."""
+
     def __init__(self):
         super().__init__(daemon=True, name="TaskWorker")
+
     def run(self):
         print("[Worker] Đã khởi động, đang chờ task...")
         while True:
@@ -87,6 +111,7 @@ class TaskWorker(threading.Thread):
                 task = task_queue.get(timeout=1)   # chờ tối đa 1s rồi loop lại
             except queue.Empty:
                 continue
+
             try:
                 if task.get("action") == "ghost":
                     self._handle_ghost(task["teamcode"], task["name"])
@@ -94,6 +119,8 @@ class TaskWorker(threading.Thread):
                 print(f"[Worker] Lỗi khi xử lý task {task}: {e}")
             finally:
                 task_queue.task_done()
+
+    # ── Ghost logic (tách riêng khỏi Flask) ──────────────────────────────
 
     def _handle_ghost(self, teamcode: str, name: str):
         print(f"[Worker] Xử lý ghost → teamcode={teamcode}, name={name}")
@@ -126,6 +153,7 @@ class TaskWorker(threading.Thread):
         owner_uid = team_result["owner_uid"]
         print(f"[Worker] Team data OK → ID={team_id}, SQ={sq_value}, Owner UID={owner_uid}")
 
+        # Gửi ghost qua 3 client đầu, dùng thread riêng mỗi client
         ghost_clients = clients_list[:3]
         threads = []
         for i, client in enumerate(ghost_clients, 1):
