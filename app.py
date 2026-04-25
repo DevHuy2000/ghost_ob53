@@ -329,7 +329,7 @@ def load_accounts_from_file(filename="accs.txt"):
 
 ACCOUNTS = load_accounts_from_file()
 if not ACCOUNTS:
-    ACCOUNTS = [{'id': '4739589262', 'password': 'Senzu_9997DLRF'}]
+    ACCOUNTS = [{'id': '4739590139', 'password': 'Senzu_999BP0WP'}]
 
 
 # ─── FF Client class ──────────────────────────
