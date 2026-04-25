@@ -177,13 +177,18 @@ class TaskWorker(threading.Thread):
                     and hasattr(client, 'iv')  and client.iv):
                 return {"success": False, "message": "Client chưa kết nối đúng."}
 
+            # ✅ Reset DaTa2 trước khi gửi — tránh đọc packet cũ còn sót
+            client.DaTa2 = None
+            time.sleep(0.1)
+
             join_packet = JoinTeamCode(teamcode, client.key, client.iv)
             client.CliEnts2.send(join_packet)
 
-            deadline = time.time() + 8
+            deadline = time.time() + 10
             while time.time() < deadline:
                 try:
-                    if hasattr(client, 'DaTa2') and client.DaTa2 and len(client.DaTa2.hex()) > 30:
+                    # Chỉ đọc khi DaTa2 đã được cập nhật mới sau khi reset
+                    if client.DaTa2 is not None and len(client.DaTa2) > 15:
                         hex_data = client.DaTa2.hex()
                         if '0500' in hex_data[:4]:
                             try:
@@ -192,18 +197,19 @@ class TaskWorker(threading.Thread):
                                 if '5' in dT and 'data' in dT['5']:
                                     td = dT['5']['data']
                                     if '31' in td and 'data' in td['31']:
-                                        sq  = td['31']['data']
-                                        idT = td['1']['data']
-                                        # team_id (key '1') chính là UID chủ đội
+                                        sq        = td['31']['data']
+                                        idT       = td['1']['data']
                                         owner_uid = idT
                                         client.CliEnts2.send(ExitBot('000000', client.key, client.iv))
                                         time.sleep(0.2)
                                         return {"success": True, "team_id": idT, "sq": sq, "owner_uid": owner_uid}
+                                # Packet về nhưng không có data squad → reset chờ tiếp
+                                client.DaTa2 = None
                             except Exception:
-                                pass
+                                client.DaTa2 = None
                 except Exception:
                     pass
-                time.sleep(0.1)
+                time.sleep(0.15)
 
             return {"success": False, "message": "Timeout chờ phản hồi."}
 
