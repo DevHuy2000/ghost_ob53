@@ -331,8 +331,9 @@ class FF_CLient():
                     except Exception as decode_error:
                         print(f"خطأ في فك تشفير الحزمة: {decode_error}")
             except OSError as e:
-                # FIX 2: Errno 9 = socket đã đóng, thoát vòng lặp
-                print(f"خطأ في استقبال البيانات (socket): {e}")
+                # Errno 9 = Bad file descriptor = socket đã đóng → thoát hẳn
+                print(f"خطأ (socket): {e}")
+                self.CliEnts2 = None
                 break
             except Exception as e:
                 print(f"خطأ في استقبال البيانات: {e}")
@@ -340,15 +341,23 @@ class FF_CLient():
 
     def Connect_SerVer(self, Token, tok, host, port, key, iv, host2, port2):
         self.AutH_ToKen_0115 = tok
-        try:
-            self.CliEnts = socket.create_connection((host, int(port)))
-            self.CliEnts.send(bytes.fromhex(self.AutH_ToKen_0115))
-            self.DaTa = self.CliEnts.recv(1024)
-        except Exception as e:
-            print(f"خطأ في الاتصال بالسيرفر الرئيسي: {e}")
-            time.sleep(5)
-            self.Connect_SerVer(Token, tok, host, port, key, iv, host2, port2)
-            return
+        while True:
+            try:
+                # Đóng socket cũ trước khi tạo mới
+                safe_close(self.CliEnts)
+                self.CliEnts = None
+                self.CliEnts = socket.create_connection((host, int(port)))
+                self.CliEnts.send(bytes.fromhex(self.AutH_ToKen_0115))
+                self.DaTa = self.CliEnts.recv(1024)
+                break
+            except Exception as e:
+                print(f"خطأ في الاتصال بالسيرفر الرئيسي: {e}")
+                safe_close(self.CliEnts)
+                self.CliEnts = None
+                time.sleep(5)
+        # Đóng CliEnts2 cũ trước khi mở thread mới
+        safe_close(self.CliEnts2)
+        self.CliEnts2 = None
         threading.Thread(
             target=self.Connect_SerVer_OnLine,
             args=(Token, tok, host, port, key, iv, host2, port2),
@@ -399,10 +408,11 @@ class FF_CLient():
                             except OSError:
                                 pass
             except OSError as e:
-                # FIX 2: bắt riêng OSError (Errno 9) tránh crash vòng lặp
-                print(f"خطأ في المعالجة الرئيسية (socket): {e}")
+                print(f"خطأ (socket): {e}")
                 safe_close(self.CliEnts)
                 safe_close(self.CliEnts2)
+                self.CliEnts = None
+                self.CliEnts2 = None
                 time.sleep(2)
                 self.Connect_SerVer(Token, tok, host, port, key, iv, host2, port2)
                 return
@@ -410,6 +420,8 @@ class FF_CLient():
                 print(f"خطأ في المعالجة الرئيسية: {e}")
                 safe_close(self.CliEnts)
                 safe_close(self.CliEnts2)
+                self.CliEnts = None
+                self.CliEnts2 = None
                 self.Connect_SerVer(Token, tok, host, port, key, iv, host2, port2)
                 return
 
