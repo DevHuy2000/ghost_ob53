@@ -303,21 +303,24 @@ class FF_CLient():
         self.DaTa2 = None
         self.CliEnts = None
         self.CliEnts2 = None
+        self._online_stop = threading.Event()
         self.Get_FiNal_ToKen_0115()
 
-    def Connect_SerVer_OnLine(self, Token, tok, host, port, key, iv, host2, port2):
+    def Connect_SerVer_OnLine(self, Token, tok, host, port, key, iv, host2, port2, stop_event):
         try:
             self.AutH_ToKen_0115 = tok
-            self.CliEnts2 = socket.create_connection((host2, int(port2)))
-            self.CliEnts2.send(bytes.fromhex(self.AutH_ToKen_0115))
+            sock = socket.create_connection((host2, int(port2)))
+            sock.send(bytes.fromhex(self.AutH_ToKen_0115))
+            self.CliEnts2 = sock
         except Exception as e:
             print(f"خطأ في الاتصال بالسيرفر الثانوي: {e}")
             return
-        while True:
+        while not stop_event.is_set():
             try:
+                if self.CliEnts2 is None:
+                    break
                 data = self.CliEnts2.recv(99999)
-                # FIX 2: kiểm tra data không rỗng trước khi dùng
-                if not data or len(data) == 0:
+                if not data:
                     time.sleep(1)
                     continue
                 self.DaTa2 = data
@@ -331,13 +334,14 @@ class FF_CLient():
                     except Exception as decode_error:
                         print(f"خطأ في فك تشفير الحزمة: {decode_error}")
             except OSError as e:
-                # Errno 9 = Bad file descriptor = socket đã đóng → thoát hẳn
                 print(f"خطأ (socket): {e}")
-                self.CliEnts2 = None
                 break
             except Exception as e:
                 print(f"خطأ في استقبال البيانات: {e}")
                 time.sleep(1)
+        # Thread kết thúc, đóng socket nếu còn
+        safe_close(self.CliEnts2)
+        self.CliEnts2 = None
 
     def Connect_SerVer(self, Token, tok, host, port, key, iv, host2, port2):
         self.AutH_ToKen_0115 = tok
@@ -355,12 +359,15 @@ class FF_CLient():
                 safe_close(self.CliEnts)
                 self.CliEnts = None
                 time.sleep(5)
-        # Đóng CliEnts2 cũ trước khi mở thread mới
+        # Signal thread cũ dừng lại, đóng socket cũ
+        self._online_stop.set()
         safe_close(self.CliEnts2)
         self.CliEnts2 = None
+        # Tạo event mới cho thread mới
+        self._online_stop = threading.Event()
         threading.Thread(
             target=self.Connect_SerVer_OnLine,
-            args=(Token, tok, host, port, key, iv, host2, port2),
+            args=(Token, tok, host, port, key, iv, host2, port2, self._online_stop),
             daemon=True
         ).start()
         self.Exemple = xMsGFixinG('12345678')
